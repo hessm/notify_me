@@ -1,0 +1,9 @@
+venv
+*.pyc
+staticfiles
+.env
+db.sqlite3
+getting-started/*
+.vscode
+3080_page.html
+*.egg-info
