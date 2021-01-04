@@ -15,7 +15,7 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     install_requires=["lxml", "discord", "python-dotenv", "boto3"],
     extras_require={
-        "dev":  ["black", "mypy", "importanize"],
+        "dev":  ["black", "mypy", "importanize", "bumpversion"],
     },
     classifiers=[
         "Programming Language :: Python :: 3",
