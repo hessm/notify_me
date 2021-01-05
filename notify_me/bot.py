@@ -39,6 +39,7 @@ class NotificationCog(commands.Cog):
 
   @commands.Cog.listener()
   async def on_connected(self):
+    log.info("Bot connected again!")
     self.connected = True
 
 
@@ -46,6 +47,11 @@ class NotificationCog(commands.Cog):
   async def on_disconnect(self):
     log.info("Bot disconnected! Cancelling poll for subscriptions")
     self.connected = False
+
+  @commands.Cog.listener()
+  async def on_resumed(self):
+    log.info("Bot resumed")
+    self.connected = True
 
   @commands.command(brief="send a test notification to yourself")
   async def test(self, ctx):
@@ -151,6 +157,6 @@ class NotificationCog(commands.Cog):
 
 
   async def send_notification_by_user(self, user: discord.User, content: str) -> discord.Message:
-    log.info(f"sending to user {user} message {content}")
+    log.info(f"sending to user {user} message len {len(content)} {content[:50]}")
     message = await user.send(content, embed=None)
     await message.edit(suppress=True)

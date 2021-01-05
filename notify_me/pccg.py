@@ -1,13 +1,13 @@
 from lxml import html, etree
 
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 import aiohttp
 from enum import Enum
 
 import logging
 log = logging.getLogger(__name__)
 
-gpu_type = Dict[str, str]
+gpu_type = Dict[str, Union[str, int]]
 
 class Messages():
   discord_max_message_length = 2000
@@ -29,8 +29,7 @@ async def query(url: str) -> str:
     async with session.get(url) as resp:
       page = await resp.text()
 
-    with open("3080_page.html", "w") as f:
-      f.write(page)
+  log.info("query result length: %s Initial content: %s", len(page), page[:50])
   
   return page
 
@@ -56,7 +55,10 @@ def parse(page: str) -> Dict[str, gpu_type]:
       log.error("Unknown status for card %s. Status found was %s", name, status)
 
     state[name] = {"name": name, "link": link, "status": status, "price": price}
-  
+
+    if len(state) == 0:
+      raise Exception("No content parsed from pccg site, something is wrong")
+
   return state
 
 
@@ -83,18 +85,6 @@ def diff(old_state: Dict[str, gpu_type], new_state: Dict[str, gpu_type]) -> Tupl
 
 
 def generate_diff_messages(new: List[gpu_type], changed: List[Tuple[gpu_type, gpu_type]], removed: List[gpu_type]) -> List[str]:
-  # "[like this](http://someurl)"
-  """
-  PCCG 3080 stock updated!
-   - [{new.name}]({new.link}) is now {new.status} from {old.status}
-  
-  New Stock:
-   - [{name}]({link}): {status}
-
-  Stock Removed:
-   - [{name}]({link})
-
-  """
   if not (len(changed) > 0 or len(new) > 0 or len(removed) > 0):
     raise ValueError("Cannot generate a message when there are no changes! Why was this called?!")
   
