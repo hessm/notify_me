@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="notify_me",
-    version="1.0.1",
+    version="1.1.0",
     author="Mark Hess",
     author_email="author@example.com",
     description="Get notified on discord when a topic of interest triggers",
