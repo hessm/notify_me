@@ -63,8 +63,8 @@ def parse(page: str) -> Dict[str, gpu_type]:
 
     state[name] = {"name": name, "link": link, "status": status, "price": price}
 
-    if len(state) == 0:
-      raise Exception("No content parsed from pccg site, something is wrong")
+  if len(state) == 0:
+    raise Exception("No content parsed from pccg site, something is wrong")
 
   return state
 
@@ -155,6 +155,11 @@ if __name__ == "__main__":
     results = parse(page)
     print(json.dumps(results, indent=2))
 
+  def test_bad_parse_pccg():
+    page = "<html></html>"
+    results = parse(page)
+    print(results)
+
   def test_generate_current_status_message():
     import json
     with open("test_data/3070_page.html", "r") as f:
@@ -178,6 +183,7 @@ if __name__ == "__main__":
       print(len(message))
 
   # test_parse_pccg()
+  test_bad_parse_pccg()
   # test_generate_current_status_message()
   # test_messages_class()
-  test_query()
+  # test_query()
