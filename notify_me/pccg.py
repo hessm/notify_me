@@ -9,6 +9,9 @@ log = logging.getLogger(__name__)
 
 gpu_type = Dict[str, Union[str, int]]
 
+class QueryError(Exception):
+  pass
+
 class Messages():
   discord_max_message_length = 2000
   def __init__(self):
@@ -24,13 +27,17 @@ class Messages():
     self.add("\n")
 
 
-async def query(url: str) -> str:
+async def query(url: str) -> Optional[str]:
   async with aiohttp.ClientSession() as session:
     async with session.get(url) as resp:
+      status = resp.status
       page = await resp.text()
 
-  log.info("query result length: %s Initial content: %s", len(page), page[:50])
+    log.info("query result %s length: %s", status, len(page))
   
+  if status != 200:
+    raise QueryError(f"Failed to query {url}. status was {status}")
+
   return page
 
 
@@ -117,7 +124,22 @@ def generate_current_status_messages(state: Dict[str, gpu_type]) -> List[str]:
   return messages.messages
 
 
+  
 if __name__ == "__main__":
+  import sys
+  handler = logging.StreamHandler(sys.stdout)
+  formatter = logging.Formatter(
+    '%(asctime)s %(name)s [%(levelname)s] %(message)s')
+  handler.setFormatter(formatter)
+  
+  logging.getLogger().addHandler(handler)
+  logging.getLogger().setLevel(logging.INFO)
+
+  from asgiref.sync import async_to_sync
+
+  def test_query():
+    page = async_to_sync(query)("https://www.pccasegear.com/category/193_2126/graphics-cards/geforce-rtx-3080")
+
   def test_generate_message():
     new: List[gpu_type] = [{"name": "fancy 3080 name", "link": "fancy 3080 link", "status": "out of stock"},{"name": "old crappy 3080 name", "link": "old crappy 3080 link", "status": "out of stock"}]
     changed: List[Tuple[gpu_type, gpu_type]] = [({"name": "standard 3080 name", "link": "standard 3080 link", "status": "1 million dollars"}, {"name": "standard 3080 name", "link": "standard 3080 link", "status": "out of stock"})]
@@ -157,4 +179,5 @@ if __name__ == "__main__":
 
   # test_parse_pccg()
   # test_generate_current_status_message()
-  test_messages_class()
+  # test_messages_class()
+  test_query()

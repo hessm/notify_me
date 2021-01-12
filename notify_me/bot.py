@@ -101,7 +101,6 @@ class NotificationCog(commands.Cog):
 
   @tasks.loop(minutes=1, reconnect=True)
   async def poll_for_changes(self):
-    log.info("Starting update")
     if self.query_running:
       log.warn("Loop already running, refusing to run again")
       return
