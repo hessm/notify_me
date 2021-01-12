@@ -58,6 +58,20 @@ class NotificationCog(commands.Cog):
     log.info(f"sending test notification to {ctx.author}")
     await self.send_notification_by_user(ctx.author, "This is a test notification")
 
+  
+  @commands.command(brief="send a notification to all subscribers")
+  async def send_update(self, ctx, message: str):
+    log.info("%s wants to say %s", ctx.author, message)
+
+    if ctx.author.id != "207076915935313920":
+      ctx.author.send(f"I can't let you do that {ctx.author}. You're not 207076915935313920")
+    
+    if len(message) > 2000:
+      ctx.author.send(f"Your message is too long, has to be < 2000 characters long")
+
+    for subscriber_id in self.state["subscribers"]:
+      await self.send_notification_by_id(subscriber_id, message)
+   
 
   @commands.command(brief="subscribe to notifications on pccg 3080 stock changes")
   async def subscribe(self, ctx):
