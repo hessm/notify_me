@@ -120,10 +120,8 @@ class NotificationCog(commands.Cog):
   @commands.command(brief="Message privately all current 3080s with their stock status and price")
   async def current_status(self, ctx):
     log.info("%s requested current status", ctx.author)
-    messages = pccg.generate_current_status_messages(self.state["last_state"])
-    for message in messages:
-      message = await ctx.author.send(message)
-      await message.edit(suppress=True)
+    message = pccg.generate_current_status_message(self.state["last_state"])
+    await self.send(ctx.author, message)
 
 
   @tasks.loop(minutes=1, reconnect=True)
@@ -156,7 +154,7 @@ class NotificationCog(commands.Cog):
     try:
       log.info("About to try notify the following subscribers %s", self.state["subscribers"])
       for subscriber_id in self.state["subscribers"]:
-        user = self.bot.get_user(user_id)
+        user = self.bot.get_user(subscriber_id)
         await self.send(user, message)
         
     except Exception as e:
@@ -165,10 +163,7 @@ class NotificationCog(commands.Cog):
       return
 
     self.state["last_state"] = new_state
-    if self.connected:
-      self.storage.save(self.state)
-    else:
-      log.warn("Refusing to save state changes while discord client is disconnected")
+    self.storage.save(self.state)
 
     self.query_running = False
     log.info("Finished update")
