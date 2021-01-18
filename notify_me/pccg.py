@@ -12,20 +12,6 @@ gpu_type = Dict[str, Union[str, int]]
 class QueryError(Exception):
   pass
 
-class Messages():
-  discord_max_message_length = 2000
-  def __init__(self):
-    self.messages = [""]
-
-  def add(self, chunk: str) -> None:
-    if len(self.messages[-1]) + len(chunk) < Messages.discord_max_message_length:
-      self.messages[-1] += chunk
-    else:
-      self.messages.append(chunk)
-
-  def newline(self) -> None:
-    self.add("\n")
-
 
 async def query(url: str) -> Optional[str]:
   async with aiohttp.ClientSession() as session:
@@ -91,38 +77,36 @@ def diff(old_state: Dict[str, gpu_type], new_state: Dict[str, gpu_type]) -> Tupl
   return new, changed, removed
 
 
-def generate_diff_messages(new: List[gpu_type], changed: List[Tuple[gpu_type, gpu_type]], removed: List[gpu_type]) -> List[str]:
+def generate_diff_message(new: List[gpu_type], changed: List[Tuple[gpu_type, gpu_type]], removed: List[gpu_type]) -> str:
   if not (len(changed) > 0 or len(new) > 0 or len(removed) > 0):
     raise ValueError("Cannot generate a message when there are no changes! Why was this called?!")
   
-  messages = Messages()
-  messages.add("PCCG 3080 stock updated!\n\n")
+  message = "PCCG 3080 stock updated!\n\n"
   
   if len(changed) > 0:
     for new_gpu, old_gpu in changed:
-      messages.add(f"'{old_gpu['status']}' -> '{new_gpu['status']}' ${new_gpu['price']} {new_gpu['link']}\n")
-    messages.newline()
+      message += f"'{old_gpu['status']}' -> '{new_gpu['status']}' ${new_gpu['price']} {new_gpu['link']}\n"
+    message += "\n"
 
   if len(new) > 0:
     for new_gpu in new:
-      messages.add(f"Newly listed: '{new_gpu['status']}' ${new_gpu['price']} {new_gpu['link']}\n")
-    messages.newline()
+      message += f"Newly listed: '{new_gpu['status']}' ${new_gpu['price']} {new_gpu['link']}\n"
+    message += "\n"
   
   if len(removed) > 0:
     for old_gpu in removed:
-      messages.add(f"No longer listed: '{old_gpu['status']}' {old_gpu['name']}\n")
+      message += f"No longer listed: '{old_gpu['status']}' {old_gpu['name']}\n"
 
-  return messages.messages
+  return message
 
 
-def generate_current_status_messages(state: Dict[str, gpu_type]) -> List[str]:
-  messages = Messages()
+def generate_current_status_message(state: Dict[str, gpu_type]) -> str:
+  message = ""
   # Sort by price then status to get a status, price sorted ordered dict
   for gpu in sorted(sorted(state.values(), key=lambda x: x['price']), key=lambda x: x['status']):
-    messages.add(f"'{gpu['status']}' ${gpu['price']} {gpu['link']}\n")
+    message += f"'{gpu['status']}' ${gpu['price']} {gpu['link']}\n"
 
-  return messages.messages
-
+  return message
 
   
 if __name__ == "__main__":
@@ -167,23 +151,7 @@ if __name__ == "__main__":
     state = parse(page)
     print(generate_current_status_message(state))
 
-  def test_messages_class():
-    messages = Messages()
-    # Message 1
-    messages.add("!this is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character comment...")
-    messages.add("!this is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character comment...")
-    messages.add("!this is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character comment...")
-    messages.add("this is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character comment...")
-  
-    # Message 2
-    messages.add("this is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character commentthis is a 500 character comment...")
-    
-    print(len(messages.messages))
-    for message in messages.messages:
-      print(len(message))
-
   # test_parse_pccg()
   test_bad_parse_pccg()
   # test_generate_current_status_message()
-  # test_messages_class()
   # test_query()
