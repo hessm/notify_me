@@ -1,6 +1,6 @@
 from discord.ext import commands, tasks
 import discord
-
+import json
 import asyncio
 import copy
 
@@ -25,37 +25,49 @@ def NewBot(**kwargs):
 
 class NotificationCog(commands.Cog):
   def __init__(self, bot, **kwargs):
+    self.metrics = {"connected": 0, "disconnected": 0, "resumed": 0, "ready": 0}
     self.state = None
     self.bot = bot
     self.storage = S3Storage(**kwargs)
     self.query_running = False
-    self.connected = False   
+    self.connected = False
     #TODO: Account for being disconnected when we find state changes. Don't write state back to storage until notifications sent
 
 
   @commands.Cog.listener()
   async def on_ready(self):
     log.info("Bot ready. starting poll for subscriptions")
+    
+    self.connected = True
+
     self.state = self.storage.load()
-    self.poll_for_changes.start()
+    
+    # on_ready can be called more than once, make sure we don't start the poll while it's already running
+    if not self.query_running:
+      self.poll_for_changes.start()
+
+    self.metrics["ready"] += 1
 
 
   @commands.Cog.listener()
   async def on_connected(self):
     log.info("Bot connected again!")
     self.connected = True
+    self.metrics["connected"] += 1
 
 
   @commands.Cog.listener()
   async def on_disconnect(self):
     log.info("Bot disconnected! Cancelling poll for subscriptions")
     self.connected = False
+    self.metrics["disconnected"] += 1
 
 
   @commands.Cog.listener()
   async def on_resumed(self):
     log.info("Bot resumed")
     self.connected = True
+    self.metrics["resumed"] += 1
 
 
   @commands.command(brief="send a test notification to yourself")
@@ -70,6 +82,7 @@ class NotificationCog(commands.Cog):
     internal_state = copy.deepcopy(self.state)
     internal_state["connected"] = self.connected
     internal_state["query_running"] = self.query_running
+    internal_state["metrics"] = self.metrics
     await self.send(ctx.author, json.dumps(internal_state, indent=2))
     
 
@@ -93,11 +106,11 @@ class NotificationCog(commands.Cog):
     if ctx.author.id in self.state["subscribers"]:
       await self.send(ctx.author, "you were already subscribed! and you're still subscribed now")
       return
-    
+
     self.state["subscribers"].append(ctx.author.id)
     self.storage.save(self.state)
     await self.send(ctx.author, "You're subscribed to pccg 3080 stock notifications, I'll let you know here if anything changes.")
-    
+
 
   @commands.command(brief="sends you a message telling you if you're subscribed or not")
   async def am_i_subscribed(self, ctx):
