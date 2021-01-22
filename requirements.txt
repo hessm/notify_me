@@ -22,7 +22,6 @@ lockfile==0.12.2
 lxml==4.6.2
 msgpack==0.6.2
 multidict==4.7.6
--e git+git@github.com:hessm/notify_me.git@fb0571f396d22d2a057f789eca0a59ff84331c8f#egg=notify_me
 packaging==20.3
 pep517==0.8.2
 progress==1.5
