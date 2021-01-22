@@ -22,7 +22,6 @@ lockfile==0.12.2
 lxml==4.6.2
 msgpack==0.6.2
 multidict==5.1.0
-notify-me==2.0.0
 packaging==20.3
 pep517==0.8.2
 progress==1.5
