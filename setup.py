@@ -13,7 +13,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/hessm/notify_me",
     packages=setuptools.find_packages(),
-    install_requires=["lxml", "discord", "discord.py==1.5.1", "python-dotenv", "boto3==1.16.47", "click", "aiohttp==3.6.3"],
+    install_requires=["lxml", "discord", "discord.py", "python-dotenv", "boto3==1.16.47", "click", "aiohttp==3.6.3"],
     extras_require={
         "dev":  ["black", "mypy", "importanize", "bumpversion", "asgiref"],
     },
