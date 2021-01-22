@@ -4,34 +4,71 @@ import json
 import asyncio
 import copy
 
-from notify_me import pccg
-from notify_me.storage import S3Storage
+from notify_me.topics import pccg
 
 from typing import Union
 
 import logging
 log = logging.getLogger(__name__)
 
-def NewBot(**kwargs):
+def new_bot(*args):
+  bot = commands.Bot(command_prefix='!', intents=discord.Intents(messages=True, members=True, guilds=True))
+  bot.add_cog(NotificationCog(bot, *args))
+  return bot
+
+class NotificationCog(commands.Cog):
   """
   Intents
   - Messages: Required to send messages to users when their subscription triggers
   - Members: Required to lookup users, since we store users as an ID we require this to message them
   - Guilds: Required entirely to get the default help message to work, otherwise unnecessary
-  """
-  bot = commands.Bot(command_prefix='!', intents=discord.Intents(messages=True, members=True, guilds=True))
-  bot.add_cog(NotificationCog(bot, **kwargs))
-  return bot
 
-class NotificationCog(commands.Cog):
-  def __init__(self, bot, **kwargs):
-    self.metrics = {"connected": 0, "disconnected": 0, "resumed": 0, "ready": 0}
-    self.state = None
+  Listeners
+  - on_ready(): Called the first time the bot is ready. Should only be called once.
+  - on_disconnect(): Called every time the bot disconnects from discord. Calls should match on_resumed unless we're currently disconnected
+  - on_resumed(): Called every time the bot re-connects to discord.
+
+  - not used on_connected(), This was once added as I thought it'd be used but it was never called by the bot. Either on ready or on resumed was called instread
+
+  Commands
+  am_i_subscribed sends you a message telling you if you're subscribed or not
+  current_status  Message privately all current 3080s with their stock status...
+  debug           Send yourself the internal state of the bot for debuging pu...
+  send_update     send a notification to all subscribers
+  subscribe       subscribe to notifications on pccg 3080 stock changes
+  test            send a test notification to yourself
+  unsubscribe     unsubscribe to notifications on pccg 3080 stock changes
+  help            Shows this message
+
+  Type !help command for more info on a command.
+  You can also type !help category for more info on a category.
+
+  """
+  def __init__(self, bot, storage, suppress_notifications):
+    """
+    topics will be a dict that looks like...
+    {
+      "name": {"type": "pccg", "last_state": {}, "subscribers": [], "topic_specific_key": "topic_specific_value",
+      for example pccg will look like
+      "pccg_3080": {"type": "pccg", "last_state": {...}, "subscribers": [], "url": "http://3080url"}
+    }
+    """
+    self.suppress_notifications = suppress_notifications
+    self.topics = None
     self.bot = bot
-    self.storage = S3Storage(**kwargs)
+    self.storage = storage
     self.query_running = False
     self.connected = False
-    #TODO: Account for being disconnected when we find state changes. Don't write state back to storage until notifications sent
+    self.metrics = {"disconnected": 0, "resumed": 0, "ready": 0}
+
+  @commands.Cog.listener()
+  async def on_command_error(self, ctx, error):
+    try:
+      # Is there a better way of doing this?
+      raise error
+    except discord.ext.commands.errors.MissingRequiredArgument as e:
+      log.info("User %s did not provide all required arguments to command %s", ctx.author, ctx.command)
+      await self.send(ctx.author, f"{ctx.command}: {e}. Use !help {ctx.command} for more information")
 
 
   @commands.Cog.listener()
@@ -40,20 +77,20 @@ class NotificationCog(commands.Cog):
     
     self.connected = True
 
-    self.state = self.storage.load()
-    
-    # on_ready can be called more than once, make sure we don't start the poll while it's already running
+    self.topics = self.storage.load()
+    for name, config in self.topics.items():
+      topic_type = config['type']
+      if not hasattr(globals()[topic_type], "run"):
+        raise ValueError(f"Topic {name} has type {topic_type} that does not support the run() method")
+      
+      if not hasattr(globals()[topic_type], "current_state"):
+        raise ValueError(f"Topic {name} has type {topic_type} that does not support the current_state() method")
+
+    # Despite me saying on_ready shouldn't be called twice I swear it was one time. Guard this so we don't run two at once by accident
     if not self.query_running:
       self.poll_for_changes.start()
 
     self.metrics["ready"] += 1
-
-
-  @commands.Cog.listener()
-  async def on_connected(self):
-    log.info("Bot connected again!")
-    self.connected = True
-    self.metrics["connected"] += 1
 
 
   @commands.Cog.listener()
@@ -72,14 +109,14 @@ class NotificationCog(commands.Cog):
 
   @commands.command(brief="send a test notification to yourself")
   async def test(self, ctx):
-    log.info(f"sending test notification to {ctx.author}")
+    log.info(f"sending test notification to {ctx.author} with id {ctx.author.id}")
     await self.send(ctx.author, "This is a test notification")
 
 
   @commands.command(brief="Send yourself the internal state of the bot for debuging purposes")
   async def debug(self, ctx):
     log.info("sending debug message to %s", ctx.author)
-    internal_state = copy.deepcopy(self.state)
+    internal_state = copy.deepcopy(self.topics)
     internal_state["connected"] = self.connected
     internal_state["query_running"] = self.query_running
     internal_state["metrics"] = self.metrics
@@ -94,49 +131,84 @@ class NotificationCog(commands.Cog):
       await self.send(ctx.author, f"I can't let you do that {ctx.author}. You're not 207076915935313920")
       return
 
-    for subscriber_id in self.state["subscribers"]:
+    all_subscribers = set()
+    for config in self.topics.values():
+      for subscriber in config["subscribers"]:
+        all_subscribers.add(subscriber)
+
+    for subscriber_id in all_subscribers:
       user = await self.bot.get_user(subscriber_id)
       await self.send(user, message)
 
 
-  @commands.command(brief="subscribe to notifications on pccg 3080 stock changes")
-  async def subscribe(self, ctx):
+  @commands.command(brief="subscribe to notifications on the given topic")
+  async def subscribe(self, ctx, topic: str):
     log.info(f"received subscribe notification from {ctx.author} {ctx.author.id}")
-
-    if ctx.author.id in self.state["subscribers"]:
+    
+    if topic not in self.topics:
+      await self.send(ctx.author, f"Topic {topic} does not exist. Available topics are {self.topics.keys()}")
+      return
+    
+    if ctx.author.id in self.topics[topic]["subscribers"]:
       await self.send(ctx.author, "you were already subscribed! and you're still subscribed now")
       return
 
-    self.state["subscribers"].append(ctx.author.id)
-    self.storage.save(self.state)
-    await self.send(ctx.author, "You're subscribed to pccg 3080 stock notifications, I'll let you know here if anything changes.")
+    self.topics[topic]["subscribers"].append(ctx.author.id)
+    self.storage.save(self.topics)
+    await self.send(ctx.author, f"You're subscribed to {topic} stock notifications, I'll let you know here if anything changes.")
 
 
-  @commands.command(brief="sends you a message telling you if you're subscribed or not")
-  async def am_i_subscribed(self, ctx):
-    log.info(f"received subscribe notification from {ctx.author.id}")
-    if ctx.author.id in self.state["subscribers"]:
-      answer = "yes"
+  @commands.command(brief="sends you a message telling you what you're subscribed to")
+  async def what_am_i_subscribed_to(self, ctx):
+    log.info("received subscribe notification from %s", ctx.author)
+    
+    subscribed_topics = []    
+    for name, config in self.topics.items():
+      if ctx.author.id in config["subscribers"]:
+        subscribed_topics.append(name)
+
+    if len(subscribed_topics) > 0:
+      topic_string = ", ".join(subscribed_topics)
+      await self.send(ctx.author, f"You are subscribed to topics {topic_string}")
+    
     else:
-      answer = "no"
-    await self.send(ctx.author, answer)
-
+      await self.send(ctx.author, f"You are not subscribed to anything! use !subscribe <topic> to subscribe, options currently are {self.topics.keys()}")
   
-  @commands.command(brief="unsubscribe to notifications on pccg 3080 stock changes")
-  async def unsubscribe(self, ctx):
-    self.state["subscribers"] = [subscriber for subscriber in self.state["subscribers"] if subscriber != ctx.author.id]
-    self.storage.save(self.state)
-    await self.send(ctx.author, "You've successfully unsubscribed from pccg 3080 notifications")
-    log.info(f"received unsubscribe notification from {ctx.author.id}")
+
+  @commands.command(brief="unsubscribe to notifications on the given topic")
+  async def unsubscribe(self, ctx, topic: str):
+    log.info(f"received unsubscribe notification from {ctx.author}")
+
+    if topic not in self.topics:
+      await self.send(ctx.author, f"Topic {topic} does not exist. Available topics are {self.topics.keys()}")
+      return
+    
+    if ctx.author.id not in self.topics[topic]["subscribers"]:
+      await self.send(ctx.author, f"You are not subscribed to {topic}. I cannot unsubscribe you =/")
+      return
+
+    self.topics[topic]["subscribers"] = [subscriber for subscriber in self.topics[topic]["subscribers"] if subscriber != ctx.author.id]
+    self.storage.save(self.topics)
+    await self.send(ctx.author, f"You've successfully unsubscribed from {topic} notifications")
 
 
-  @commands.command(brief="Message privately all current 3080s with their stock status and price")
-  async def current_status(self, ctx):
+  @commands.command(brief="Message privately the current state of a given topic")
+  async def current_status(self, ctx, topic: str):
     log.info("%s requested current status", ctx.author)
-    message = pccg.generate_current_status_message(self.state["last_state"])
+
+    if topic not in self.topics:
+      await self.send(ctx.author, f"Topic {topic} does not exist. Available topics are {self.topics.keys()}")
+      return
+
+    config = self.topics[topic]
+    topic_type = config['type']
+
+    current_state_method = getattr(globals()[topic_type], "current_state")
+    message = current_state_method(config)
+
     await self.send(ctx.author, message)
 
-
+  
   @tasks.loop(minutes=1, reconnect=True)
   async def poll_for_changes(self):
     if self.query_running:
@@ -146,40 +218,38 @@ class NotificationCog(commands.Cog):
     self.query_running = True
 
     try:
-      page = await pccg.query("https://www.pccasegear.com/category/193_2126/graphics-cards/geforce-rtx-3080")
-      new_state = pccg.parse(page)
+      # We check for the existence of these in on_ready to fail early. Safe to just assume they exist here.
+      for name in self.topics:
+        topic_type = self.topics[name]['type']
+        run = getattr(globals()[topic_type], "run")
+        message, new_state = await run(name, self.topics[name])
 
-    except Exception as e:
-      log.exception("Failed to query and parse the PCCG url") 
-      self.query_running = False
-      return
+        if message:
+          log.info("About to try notify the following subscribers %s", self.topics[name]["subscribers"])
+          for subscriber_id in self.topics[name]["subscribers"]:
+            if self.suppress_notifications:
+              log.info("Suppressing notifications")
+              continue
+            user = self.bot.get_user(subscriber_id)
+            await self.send(user, message)
 
-    new, changes, removed = pccg.diff(self.state["last_state"], new_state)
-    
-    if not (new or changes or removed):
-      log.info("No changes, update complete")
-      self.query_running = False
-      return
+          self.topics[name]["last_state"] = new_state
+          self.storage.save(self.topics)
 
-    message = pccg.generate_diff_message(new, changes, removed)
-    log.info("Generated message %s", message)
-    
-    try:
-      log.info("About to try notify the following subscribers %s", self.state["subscribers"])
-      for subscriber_id in self.state["subscribers"]:
-        user = self.bot.get_user(subscriber_id)
-        await self.send(user, message)
-        
     except Exception as e:
       log.exception("Failed to send one or more notifications. Refusing to save state, may send duplicate notifications in future")
       self.query_running = False
       return
 
-    self.state["last_state"] = new_state
-    self.storage.save(self.state)
-
     self.query_running = False
     log.info("Finished update")
+
+
+  async def notify_does_topic_exist(self, author, topic: str):
+    if topic not in self.topics:
+      self.send(author, f"Topic {topic} does not exist. Available topics are {self.topics.keys()}")
+      return False
+    return True
 
 
   async def send(self, messageable: discord.abc.Messageable, message: str):

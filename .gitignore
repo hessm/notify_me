@@ -7,3 +7,4 @@ getting-started/*
 .vscode
 3080_page.html
 *.egg-info
+state.json

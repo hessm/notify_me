@@ -1,6 +1,6 @@
 from lxml import html, etree
 
-from typing import List, Dict, Optional, Tuple, Union
+from typing import List, Dict, Optional, Tuple, Union, Any
 import aiohttp
 from enum import Enum
 
@@ -13,7 +13,23 @@ class QueryError(Exception):
   pass
 
 
-async def query(url: str) -> Optional[str]:
+async def run(name: str, config) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+  log.info(f"Running pccg check named {name} against url {config['url']}")
+  page = await query(config["url"])
+  new_state = parse(page)
+
+  new, changes, removed = diff(config["last_state"], new_state)
+  
+  if not (new or changes or removed):
+    log.info("No changes, update complete")
+    return None, None
+
+  message = generate_diff_message(new, changes, removed)
+  log.info("Generated message %s", message)
+  return message, new_state
+    
+
+async def query(url: str) -> str:
   async with aiohttp.ClientSession() as session:
     async with session.get(url) as resp:
       status = resp.status
@@ -100,7 +116,9 @@ def generate_diff_message(new: List[gpu_type], changed: List[Tuple[gpu_type, gpu
   return message
 
 
-def generate_current_status_message(state: Dict[str, gpu_type]) -> str:
+def current_state(config: Dict[str, Union[Any, Dict[str, gpu_type]]]) -> str:
+  state: Dict[str, gpu_type] = config["last_state"]
+
   message = ""
   # Sort by price then status to get a status, price sorted ordered dict
   for gpu in sorted(sorted(state.values(), key=lambda x: x['price']), key=lambda x: x['status']):
