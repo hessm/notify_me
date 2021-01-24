@@ -7,7 +7,6 @@ setuptools.setup(
     name="notify_me",
     version="2.0.0",
     author="Mark Hess",
-    author_email="author@example.com",
     description="Get notified on discord when a topic of interest triggers",
     long_description=long_description,
     long_description_content_type="text/markdown",

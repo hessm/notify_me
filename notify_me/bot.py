@@ -6,7 +6,7 @@ import copy
 
 from notify_me.topics import pccg
 
-from typing import Union
+from typing import Union, Optional
 
 import logging
 log = logging.getLogger(__name__)
@@ -54,12 +54,23 @@ class NotificationCog(commands.Cog):
     }
     """
     self.suppress_notifications = suppress_notifications
+    self.admins = None
     self.topics = None
     self.bot = bot
     self.storage = storage
     self.query_running = False
     self.connected = False
     self.metrics = {"disconnected": 0, "resumed": 0, "ready": 0}
+
+  def save(self):
+    self.storage.save({"topics": self.topics, "admins": self.admins})
+
+
+  def load(self):
+    config = self.storage.load()
+    self.topics = config["topics"]
+    self.admins = config["admins"]
+
 
   @commands.Cog.listener()
   async def on_command_error(self, ctx, error):
@@ -74,10 +85,10 @@ class NotificationCog(commands.Cog):
   @commands.Cog.listener()
   async def on_ready(self):
     log.info("Bot ready. starting poll for subscriptions")
-    
+
     self.connected = True
 
-    self.topics = self.storage.load()
+    self.load()
     for name, config in self.topics.items():
       topic_type = config['type']
       if not hasattr(globals()[topic_type], "run"):
@@ -127,7 +138,7 @@ class NotificationCog(commands.Cog):
   async def send_update(self, ctx, message: str):
     log.info("%s wants to say %s", ctx.author, message)
 
-    if ctx.author.id != "207076915935313920":
+    if ctx.author.id != 207076915935313920:
       await self.send(ctx.author, f"I can't let you do that {ctx.author}. You're not 207076915935313920")
       return
 
@@ -154,7 +165,7 @@ class NotificationCog(commands.Cog):
       return
 
     self.topics[topic]["subscribers"].append(ctx.author.id)
-    self.storage.save(self.topics)
+    self.save()
     await self.send(ctx.author, f"You're subscribed to {topic} stock notifications, I'll let you know here if anything changes.")
 
 
@@ -188,7 +199,7 @@ class NotificationCog(commands.Cog):
       return
 
     self.topics[topic]["subscribers"] = [subscriber for subscriber in self.topics[topic]["subscribers"] if subscriber != ctx.author.id]
-    self.storage.save(self.topics)
+    self.save()
     await self.send(ctx.author, f"You've successfully unsubscribed from {topic} notifications")
 
 
@@ -208,6 +219,23 @@ class NotificationCog(commands.Cog):
 
     await self.send(ctx.author, message)
 
+
+  @commands.command(brief="What is my userid?")
+  async def user_id(self, ctx):
+    log.info("Giving %s their user id of %s", ctx.author, ctx.author.id)
+
+    await self.send(ctx.author, f"Your username is {ctx.author} and your user id is {ctx.author.id}")
+
+  @commands.command(brief="Who's user id is this?")
+  async def id_lookup(self, ctx, user_id: int):
+    user = self.bot.get_user(user_id)
+    
+    if user is None:
+      await self.send(ctx.author, f"Lookup failed for user id {user_id}, is that ID correct?")
+      return
+
+    await self.send(ctx.author, f"User {user_id} is {user}")
+
   
   @tasks.loop(minutes=1, reconnect=True)
   async def poll_for_changes(self):
@@ -226,15 +254,29 @@ class NotificationCog(commands.Cog):
 
         if message:
           log.info("About to try notify the following subscribers %s", self.topics[name]["subscribers"])
+          
           for subscriber_id in self.topics[name]["subscribers"]:
             if self.suppress_notifications:
               log.info("Suppressing notifications")
               continue
+            
             user = self.bot.get_user(subscriber_id)
+
+            # User IDs changed one time. I think I fucked them up somehow but they *might* have changed on discords end.
+            # For posterity I have recorded them here.
+            # What I had         Actual ID          User Tag
+            # 164645063840759800 164645063840759810 Mak#4811
+            # 146919847773732860 146919847773732864 Althalus#8960
+            
+            if user is None:
+              self.notify_admins(f"Failed to lookup user id {subscriber_id}. Not sending message to them. Message: {message}")
+              log.error("Failed to lookup user id %s. Continuing with other users.", subscriber_id)
+              continue
+
             await self.send(user, message)
 
           self.topics[name]["last_state"] = new_state
-          self.storage.save(self.topics)
+          self.save()
 
     except Exception as e:
       log.exception("Failed to send one or more notifications. Refusing to save state, may send duplicate notifications in future")
@@ -251,6 +293,20 @@ class NotificationCog(commands.Cog):
       return False
     return True
 
+  def find_user(name: str, discriminator: str) -> Optional[discord.abc.User]:
+    return discord.utils.find(lambda u: u.name == name and u.discriminator == discriminator)
+
+  async def notify_admins(message: str):
+    log.info("Notifying admins about: %s", message)
+    # What happens if we can't notify admins?
+    for admin_id in self.topics["Admins"]:
+      admin = self.bot.get_user(admin_id)
+      if not admin:
+        log.error("Cannot lookup admin while trying to notify of an error. This is bad. Admin id was %s", admin_id)
+        continue
+
+      self.send(admin, message)
+      
 
   async def send(self, messageable: discord.abc.Messageable, message: str):
     log.info("Sending to %s message of length %s", messageable, len(message))
